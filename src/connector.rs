@@ -28,15 +28,15 @@ pub struct Builder {}
 
 impl Builder {
     /// Use HTTPS instead of HTTP
-    // #[cfg(feature = "tls")]
-    // pub fn https(self) -> HttpsBuilder {
-    //     HttpsBuilder {
-    //         #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "ios")))]
-    //         server_cert: None,
-    //         #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "ios")))]
-    //         client_cert: None,
-    //     }
-    // }
+    #[cfg(feature = "tls")]
+    pub fn https(self) -> HttpsBuilder {
+        HttpsBuilder {
+            #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "ios")))]
+            server_cert: None,
+            #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "ios")))]
+            client_cert: None,
+        }
+    }
 
     /// Build a HTTP connector
     pub fn build(self) -> hyper_util::client::legacy::connect::HttpConnector {
@@ -95,9 +95,10 @@ impl HttpsBuilder {
     pub fn build(
         self,
     ) -> Result<
-        hyper_openssl::HttpsConnector<hyper::client::HttpConnector>,
+        hyper_openssl::client::legacy::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
         openssl::error::ErrorStack,
-    > {
+    >
+     {
         // SSL implementation
         let mut ssl = openssl::ssl::SslConnector::builder(openssl::ssl::SslMethod::tls())?;
 
@@ -113,9 +114,8 @@ impl HttpsBuilder {
             ssl.check_private_key()?;
         }
 
-        let mut connector = hyper::client::HttpConnector::new();
-        connector.enforce_http(false);
-        hyper_openssl::HttpsConnector::<hyper::client::HttpConnector>::with_connector(
+        let connector = hyper_util::client::legacy::connect::HttpConnector::new();
+        hyper_openssl::client::legacy::HttpsConnector::with_connector(
             connector, ssl,
         )
     }

@@ -86,9 +86,9 @@ mod one_any_of;
 pub use one_any_of::*;
 
 /// Helper Bound for Errors for MakeService/Service wrappers
-pub trait ErrorBound: Into<Box<dyn std::error::Error + Send + Sync>> {}
+pub trait ErrorBound: Into<Box<dyn error::Error + Send + Sync>> {}
 
-impl<T> ErrorBound for T where T: Into<Box<dyn std::error::Error + Send + Sync>> {}
+impl<T> ErrorBound for T where T: Into<Box<dyn error::Error + Send + Sync>> {}
 
 /// Very simple error type - just holds a description of the error. This is useful for human
 /// diagnosis and troubleshooting, but not for applications to parse. The justification for this
