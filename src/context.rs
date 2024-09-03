@@ -522,10 +522,6 @@ impl<T: Clone, C: Clone> Clone for ContextWrapper<T, C> {
 ///     type Error = T::Error;
 ///     type Future = T::Future;
 ///
-///     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-///         self.inner.poll_ready(cx)
-///     }
-///
 ///     fn call(&mut self, req: (hyper::Request<hyper::Body>, C)) -> Self::Future {
 ///         self.inner.call(req)
 ///     }

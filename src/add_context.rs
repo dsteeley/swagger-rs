@@ -3,24 +3,24 @@
 
 use crate::{Push, XSpanIdString};
 use futures::future::FutureExt;
+use hyper::body::Body;
 use hyper::Request;
 use std::marker::PhantomData;
-use std::task::Poll;
 
 /// Middleware wrapper service, that should be used as the outermost layer in a
 /// stack of hyper services. Adds a context to a plain `hyper::Request` that can be
 /// used by subsequent layers in the stack.
 #[derive(Debug)]
-pub struct AddContextMakeService<T, C>
+pub struct AddContextMakeService<T, C, ReqBody, RespBody>
 where
     C: Default + Push<XSpanIdString> + 'static + Send,
     C::Result: Send + 'static,
 {
     inner: T,
-    marker: PhantomData<C>,
+    marker: PhantomData<fn(C, ReqBody, RespBody)>,
 }
 
-impl<T, C> AddContextMakeService<T, C>
+impl<T, C, ReqBody, RespBody> AddContextMakeService<T, C, ReqBody, RespBody>
 where
     C: Default + Push<XSpanIdString> + 'static + Send,
     C::Result: Send + 'static,
@@ -34,23 +34,21 @@ where
     }
 }
 
-impl<Inner, Context, Target> hyper::service::Service<Target>
-    for AddContextMakeService<Inner, Context>
+impl<Inner, Context, Target, ReqBody, RespBody> hyper::service::Service<Target>
+    for AddContextMakeService<Inner, Context, ReqBody, RespBody>
 where
     Context: Default + Push<XSpanIdString> + 'static + Send,
     Context::Result: Send + 'static,
     Inner: hyper::service::Service<Target>,
     Inner::Future: Send + 'static,
+    ReqBody: Body,
+    RespBody: Body,
 {
     type Error = Inner::Error;
-    type Response = AddContextService<Inner::Response, Context>;
+    type Response = AddContextService<Inner::Response, Context, ReqBody, RespBody>;
     type Future = futures::future::BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, target: Target) -> Self::Future {
+    fn call(&self, target: Target) -> Self::Future {
         Box::pin(
             self.inner
                 .call(target)
@@ -65,16 +63,16 @@ where
 /// not usually be used directly - when constructing a hyper stack use
 /// `AddContextMakeService`, which will create `AddContextService` instances as needed.
 #[derive(Debug)]
-pub struct AddContextService<T, C>
+pub struct AddContextService<T, C, ReqBody, RespBody>
 where
     C: Default + Push<XSpanIdString>,
     C::Result: Send + 'static,
 {
     inner: T,
-    marker: PhantomData<C>,
+    marker: PhantomData<fn(C, ReqBody, RespBody)>,
 }
 
-impl<T, C> AddContextService<T, C>
+impl<T, C, ReqBody, RespBody> AddContextService<T, C, ReqBody, RespBody>
 where
     C: Default + Push<XSpanIdString>,
     C::Result: Send + 'static,
@@ -88,25 +86,20 @@ where
     }
 }
 
-impl<Inner, Context, Body> hyper::service::Service<Request<Body>>
-    for AddContextService<Inner, Context>
+impl<Inner, Context, ReqBody, RespBody> hyper::service::Service<Request<ReqBody>>
+    for AddContextService<Inner, Context, ReqBody, RespBody>
 where
     Context: Default + Push<XSpanIdString> + Send + 'static,
     Context::Result: Send + 'static,
-    Inner: hyper::service::Service<(Request<Body>, Context::Result)>,
+    Inner: hyper::service::Service<(Request<ReqBody>, Context::Result)>,
+    ReqBody: Body,
+    RespBody: Body,
 {
     type Response = Inner::Response;
     type Error = Inner::Error;
     type Future = Inner::Future;
 
-    fn poll_ready(
-        &mut self,
-        context: &mut std::task::Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(context)
-    }
-
-    fn call(&mut self, req: Request<Body>) -> Self::Future {
+    fn call(&self, req: Request<ReqBody>) -> Self::Future {
         let x_span_id = XSpanIdString::get_or_generate(&req);
         let context = Context::default().push(x_span_id);
 

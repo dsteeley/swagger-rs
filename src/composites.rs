@@ -9,7 +9,7 @@ use std::fmt;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::ops::{Deref, DerefMut};
-use std::task::{Context, Poll};
+// use std::task::{Context, Poll};
 
 /// Trait for generating a default "not found" response. Must be implemented on
 /// the `Response` associated type for `MakeService`s being combined in a
@@ -41,11 +41,11 @@ impl<'a> HasRemoteAddr for &'a Option<SocketAddr> {
     }
 }
 
-impl<'a> HasRemoteAddr for &'a hyper::server::conn::AddrStream {
-    fn remote_addr(&self) -> Option<SocketAddr> {
-        Some(hyper::server::conn::AddrStream::remote_addr(self))
-    }
-}
+// impl<'a> HasRemoteAddr for &'a hyper::server::conn::AddrStream {
+//     fn remote_addr(&self) -> Option<SocketAddr> {
+//         Some(hyper::server::conn::AddrStream::remote_addr(self))
+//     }
+// }
 
 #[cfg(feature = "uds")]
 impl<'a> HasRemoteAddr for &'a tokio::net::UnixStream {
@@ -59,10 +59,10 @@ impl<'a> HasRemoteAddr for &'a tokio::net::UnixStream {
 /// Wraps tower_service::Service
 pub trait CompositedService<ReqBody, ResBody, Error> {
     /// See tower_service::Service::poll_ready
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>>;
+    // fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>>;
     /// See tower_service::Service::call
     fn call(
-        &mut self,
+        &self,
         req: Request<ReqBody>,
     ) -> BoxFuture<'static, Result<Response<ResBody>, Error>>;
 }
@@ -72,12 +72,12 @@ where
     T: Service<Request<ReqBody>, Response = Response<ResBody>, Error = Error>,
     T::Future: Send + 'static,
 {
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
-        Service::poll_ready(self, cx)
-    }
+    // fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+    //     Service::poll_ready(self, cx)
+    // }
 
     fn call(
-        &mut self,
+        &self,
         req: Request<ReqBody>,
     ) -> BoxFuture<'static, Result<Response<ResBody>, Error>> {
         Box::pin(Service::call(self, req))
@@ -94,9 +94,9 @@ type FutureService<ReqBody, ResBody, Error, MakeError> = BoxFuture<
 /// Wraps tower_service::Service
 pub trait CompositedMakeService<Target, ReqBody, ResBody, Error, MakeError> {
     /// See tower_service::Service::poll_ready
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), MakeError>>;
+    // fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), MakeError>>;
     /// See tower_service::Service::call
-    fn call(&mut self, target: Target) -> FutureService<ReqBody, ResBody, Error, MakeError>;
+    fn call(&self, target: Target) -> FutureService<ReqBody, ResBody, Error, MakeError>;
 }
 
 impl<T, S, F, Target, ReqBody, ResBody, Error, MakeError>
@@ -107,11 +107,12 @@ where
     F: Future<Output = Result<S, MakeError>> + Send + 'static,
     S: CompositedService<ReqBody, ResBody, Error> + Send + 'static,
 {
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), MakeError>> {
-        Service::poll_ready(self, cx)
-    }
+    // fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), MakeError>> {
+    //     // Service::poll_ready(self, cx)
+    //     unimplemented!()
+    // }
 
-    fn call(&mut self, target: Target) -> FutureService<ReqBody, ResBody, Error, MakeError> {
+    fn call(&self, target: Target) -> FutureService<ReqBody, ResBody, Error, MakeError> {
         Box::pin(Service::call(self, target).map(|r| match r {
             Ok(s) => {
                 let s: Box<dyn CompositedService<ReqBody, ResBody, Error> + Send> = Box::new(s);
@@ -191,28 +192,18 @@ where
     type Response = CompositeService<ReqBody, ResBody, Error>;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        for service in &mut self.0 {
-            match service.1.poll_ready(cx) {
-                Poll::Ready(Ok(_)) => {}
-                Poll::Ready(Err(e)) => {
-                    return Poll::Ready(Err(e));
-                }
-                Poll::Pending => {
-                    return Poll::Pending;
-                }
-            }
-        }
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, target: Connection) -> Self::Future {
-        let mut services = Vec::with_capacity(self.0.len());
+    fn call(&self, target: Connection) -> Self::Future {
+        // let mut services = Vec::with_capacity(self.0.len());
         let addr = target.remote_addr();
-        for (path, service) in &mut self.0 {
+        let services:Vec<_> = self.0.iter().map(|(path, service)| {
             let path: &'static str = path;
-            services.push(service.call(addr).map_ok(move |s| (path, s)));
-        }
+            service.call(addr).map_ok(move |s| (path, s))
+        }).collect();
+
+        // for (path, service) in &self.0 {
+        //     let path: &'static str = path;
+        //     services.push(service.call(addr).map_ok(move |s| (path, s)));
+        // }
         Box::pin(futures::future::join_all(services).map(|results| {
             let services: Result<Vec<_>, MakeError> = results.into_iter().collect();
 
@@ -275,25 +266,30 @@ where
     type Response = Response<ResBody>;
     type Future = BoxFuture<'static, Result<Response<ResBody>, Error>>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        for service in &mut self.0 {
-            match service.1.poll_ready(cx) {
-                Poll::Ready(Ok(_)) => {}
-                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
-                Poll::Pending => return Poll::Pending,
-            }
-        }
-        Poll::Ready(Ok(()))
-    }
+    // fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    //     for service in &mut self.0 {
+    //         match service.1.poll_ready(cx) {
+    //             Poll::Ready(Ok(_)) => {}
+    //             Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+    //             Poll::Pending => return Poll::Pending,
+    //         }
+    //     }
+    //     Poll::Ready(Ok(()))
+    // }
 
-    fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
-        for &mut (base_path, ref mut service) in &mut self.0 {
-            if req.uri().path().starts_with(base_path) {
-                return service.call(req);
-            }
-        }
+    fn call(&self, req: Request<ReqBody>) -> Self::Future {
+        // for (base_path, ref mut service) in self.0 {
+        //     if req.uri().path().starts_with(base_path) {
+        //         return service.call(req);
+        //     }
+        // }
+        self.0.iter().filter(|(base_path,_)| {
+            req.uri().path().starts_with(base_path)
+        }).next().map(|(_, service)| service.call(req)).unwrap_or_else(|| {
+            Box::pin(futures::future::ok(ResBody::not_found()))
+        })
 
-        Box::pin(futures::future::ok(ResBody::not_found()))
+        // Box::pin(futures::future::ok(ResBody::not_found()))
     }
 }
 
