@@ -30,15 +30,15 @@ use futures::future::FutureExt as _;
 /// composite_new_service.push(("/base/path/3", DropContextMakeService::new(plain_service)));
 /// ```
 #[derive(Debug)]
-pub struct DropContextMakeService<T, C, ReqBody, RespBody>
+pub struct DropContextMakeService<T, C>
 where
     C: Send + 'static,
 {
     inner: T,
-    marker: PhantomData<fn(C, ReqBody, RespBody)>,
+    marker: PhantomData<C>,
 }
 
-impl<T, C, ReqBody, RespBody> DropContextMakeService<T, C, ReqBody, RespBody>
+impl<T, C> DropContextMakeService<T, C>
 where
     C: Send + 'static,
 {
@@ -51,16 +51,14 @@ where
     }
 }
 
-impl<Inner, Context, Target, ReqBody, RespBody> hyper::service::Service<Target>
-    for DropContextMakeService<Inner, Context, ReqBody, RespBody>
+impl<Inner, Context, Target> hyper::service::Service<Target>
+    for DropContextMakeService<Inner, Context>
 where
     Context: Send + 'static,
     Inner: hyper::service::Service<Target>,
     Inner::Future: Send + 'static,
-    ReqBody: hyper::body::Body,
-    RespBody: hyper::body::Body,
 {
-    type Response = DropContextService<Inner::Response, Context, ReqBody, RespBody>;
+    type Response = DropContextService<Inner::Response, Context>;
     type Error = Inner::Error;
     type Future = futures::future::BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -92,15 +90,15 @@ where
 /// let response = client.call((request, context));
 /// ```
 #[derive(Debug, Clone)]
-pub struct DropContextService<T, C, ReqBody, RespBody>
+pub struct DropContextService<T, C>
 where
     C: Send + 'static,
 {
     inner: T,
-    marker: PhantomData<fn(C, ReqBody, RespBody)>,
+    marker: PhantomData<C>,
 }
 
-impl<T, C, ReqBody, RespBody> DropContextService<T, C, ReqBody, RespBody>
+impl<T, C> DropContextService<T, C>
 where
     C: Send + 'static,
 {
@@ -113,20 +111,18 @@ where
     }
 }
 
-impl<Inner, Context, ReqBody, RespBody> hyper::service::Service<(Request<ReqBody>, Context)>
-    for DropContextService<Inner, Context, ReqBody, RespBody>
+impl<Inner, Context, Body> hyper::service::Service<(Request<Body>, Context)>
+    for DropContextService<Inner, Context>
 where
     Context: Send + 'static,
-    Inner: hyper::service::Service<Request<ReqBody>>,
-    ReqBody: hyper::body::Body,
-    RespBody: hyper::body::Body,
+    Inner: hyper::service::Service<Request<Body>>,
 {
     type Response = Inner::Response;
     type Error = Inner::Error;
     type Future = Inner::Future;
 
 
-    fn call(&self, (req, _): (Request<ReqBody>, Context)) -> Self::Future {
+    fn call(&self, (req, _): (Request<Body>, Context)) -> Self::Future {
         self.inner.call(req)
     }
 }
