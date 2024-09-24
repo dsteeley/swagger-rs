@@ -57,7 +57,6 @@ mod context_tests {
     use http_body_util::Full;
     use hyper::Uri;
     use std::str::FromStr;
-
     struct TestParser1;
 
     impl RequestParser<Full<Bytes>> for TestParser1 {
@@ -72,7 +71,6 @@ mod context_tests {
 
     struct TestParser2;
 
-    // these should be generalised to take in either empty of full bodies
     impl RequestParser<Full<Bytes>> for TestParser2 {
         fn parse_operation_id(request: &Request<Full<Bytes>>) -> Option<&'static str> {
             match request.uri().path() {
@@ -86,13 +84,13 @@ mod context_tests {
     #[test]
     fn test_macros() {
         let uri = Uri::from_str(&"https://www.rust-lang.org/test/t11").unwrap();
-        let req1 = Request::get(uri).body(Full::default()).unwrap();
+        let req1: Request<Full<Bytes>> = Request::get(uri).body(Full::default()).unwrap();
 
         let uri = Uri::from_str(&"https://www.rust-lang.org/test/t22").unwrap();
-        let req2 = Request::get(uri).body(Full::default()).unwrap();
+        let req2: Request<Full<Bytes>> = Request::get(uri).body(Full::default()).unwrap();
 
         let uri = Uri::from_str(&"https://www.rust-lang.org/test/t33").unwrap();
-        let req3 = Request::get(uri).body(Full::default()).unwrap();
+        let req3: Request<Full<Bytes>> = Request::get(uri).body(Full::default()).unwrap();
 
         request_parser_joiner!(JoinedReqParser, TestParser1, TestParser2);
 

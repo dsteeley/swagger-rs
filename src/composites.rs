@@ -3,6 +3,8 @@
 //! Use by passing `hyper::server::MakeService` instances to a `CompositeMakeService`
 //! together with the base path for requests that should be handled by that service.
 use futures::future::{BoxFuture, FutureExt, TryFutureExt};
+use http_body_util::Either;
+use hyper::body::Body;
 use hyper::service::Service;
 use hyper::{Request, Response, StatusCode};
 use std::fmt;
@@ -61,10 +63,7 @@ pub trait CompositedService<ReqBody, ResBody, Error> {
     /// See tower_service::Service::poll_ready
     // fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>>;
     /// See tower_service::Service::call
-    fn call(
-        &self,
-        req: Request<ReqBody>,
-    ) -> BoxFuture<'static, Result<Response<ResBody>, Error>>;
+    fn call(&self, req: Request<ReqBody>) -> BoxFuture<'static, Result<Response<ResBody>, Error>>;
 }
 
 impl<T, ReqBody, ResBody, Error> CompositedService<ReqBody, ResBody, Error> for T
@@ -76,10 +75,7 @@ where
     //     Service::poll_ready(self, cx)
     // }
 
-    fn call(
-        &self,
-        req: Request<ReqBody>,
-    ) -> BoxFuture<'static, Result<Response<ResBody>, Error>> {
+    fn call(&self, req: Request<ReqBody>) -> BoxFuture<'static, Result<Response<ResBody>, Error>> {
         Box::pin(Service::call(self, req))
     }
 }
@@ -164,14 +160,10 @@ pub type CompositeMakeServiceEntry<Target, ReqBody, ResBody, Error, MakeError> =
 #[derive(Default)]
 pub struct CompositeMakeService<Target, ReqBody, ResBody, Error, MakeError>(
     CompositeMakeServiceVec<Target, ReqBody, ResBody, Error, MakeError>,
-)
-where
-    ResBody: NotFound<ResBody>;
+);
 
 impl<Target, ReqBody, ResBody, Error, MakeError>
     CompositeMakeService<Target, ReqBody, ResBody, Error, MakeError>
-where
-    ResBody: NotFound<ResBody>,
 {
     /// create an empty `CompositeMakeService`
     pub fn new() -> Self {
@@ -179,26 +171,30 @@ where
     }
 }
 
-impl<ReqBody, ResBody, Error, MakeError, Connection> Service<Connection>
+impl<Error, ReqBody, ResBody, MakeError> Service<Option<SocketAddr>>
     for CompositeMakeService<Option<SocketAddr>, ReqBody, ResBody, Error, MakeError>
 where
-    Connection: HasRemoteAddr,
-    ReqBody: 'static,
-    ResBody: NotFound<ResBody> + 'static,
+    // Connection: SocketAddr,
     MakeError: Send + 'static,
     Error: 'static,
+    ResBody: Send + 'static,
+    ReqBody: Send + 'static,
 {
     type Error = MakeError;
     type Response = CompositeService<ReqBody, ResBody, Error>;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn call(&self, target: Connection) -> Self::Future {
+    fn call(&self, target: Option<SocketAddr>) -> Self::Future {
         // let mut services = Vec::with_capacity(self.0.len());
-        let addr = target.remote_addr();
-        let services:Vec<_> = self.0.iter().map(|(path, service)| {
-            let path: &'static str = path;
-            service.call(addr).map_ok(move |s| (path, s))
-        }).collect();
+        let addr = target.unwrap_or_else(|| SocketAddr::new([0, 0, 0, 0].into(), 0));
+        let services: Vec<_> = self
+            .0
+            .iter()
+            .map(|(path, service)| {
+                let path: &'static str = path;
+                service.call(Some(addr)).map_ok(move |s| (path, s))
+            })
+            .collect();
 
         // for (path, service) in &self.0 {
         //     let path: &'static str = path;
@@ -214,8 +210,8 @@ where
 
 impl<Target, ReqBody, ResBody, Error, MakeError> fmt::Debug
     for CompositeMakeService<Target, ReqBody, ResBody, Error, MakeError>
-where
-    ResBody: NotFound<ResBody>,
+// where
+//     ResBody: NotFound<ResBody>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         // Get vector of base paths
@@ -230,8 +226,8 @@ where
 
 impl<Target, ReqBody, ResBody, Error, MakeError> Deref
     for CompositeMakeService<Target, ReqBody, ResBody, Error, MakeError>
-where
-    ResBody: NotFound<ResBody>,
+// where
+//     ResBody: NotFound<ResBody>,
 {
     type Target = CompositeMakeServiceVec<Target, ReqBody, ResBody, Error, MakeError>;
 
@@ -242,8 +238,8 @@ where
 
 impl<Target, ReqBody, ResBody, Error, MakeError> DerefMut
     for CompositeMakeService<Target, ReqBody, ResBody, Error, MakeError>
-where
-    ResBody: NotFound<ResBody>,
+// where
+//     ResBody: NotFound<ResBody>,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
@@ -252,15 +248,15 @@ where
 
 /// Wraps a vector of pairs, each consisting of a base path as a `&'static str`
 /// and a `Service` instance.
-pub struct CompositeService<ReqBody, ResBody, Error>(CompositeServiceVec<ReqBody, ResBody, Error>)
-where
-    ResBody: NotFound<ResBody>;
+pub struct CompositeService<ReqBody, ResBody, Error>(CompositeServiceVec<ReqBody, ResBody, Error>);
 
 impl<ReqBody, ResBody, Error> Service<Request<ReqBody>>
     for CompositeService<ReqBody, ResBody, Error>
 where
     Error: Send + 'static,
     ResBody: NotFound<ResBody> + Send + 'static,
+    ResBody: Body + Send + 'static,
+    ReqBody: Body + Send + 'static,
 {
     type Error = Error;
     type Response = Response<ResBody>;
@@ -283,19 +279,20 @@ where
         //         return service.call(req);
         //     }
         // }
-        self.0.iter().filter(|(base_path,_)| {
-            req.uri().path().starts_with(base_path)
-        }).next().map(|(_, service)| service.call(req)).unwrap_or_else(|| {
-            Box::pin(futures::future::ok(ResBody::not_found()))
-        })
+        self.0
+            .iter()
+            .filter(|(base_path, _)| req.uri().path().starts_with(base_path))
+            .next()
+            .map(|(_, service)| service.call(req))
+            .unwrap_or_else(|| Box::pin(futures::future::ok(ResBody::not_found())))
 
         // Box::pin(futures::future::ok(ResBody::not_found()))
     }
 }
 
 impl<ReqBody, ResBody, Error> fmt::Debug for CompositeService<ReqBody, ResBody, Error>
-where
-    ResBody: NotFound<ResBody>,
+// where
+//     ResBody: NotFound<ResBody>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         // Get vector of base paths
@@ -306,7 +303,6 @@ where
 
 impl<ReqBody, ResBody, Error> Deref for CompositeService<ReqBody, ResBody, Error>
 where
-    ResBody: NotFound<ResBody> + 'static,
     Error: 'static,
 {
     type Target = CompositeServiceVec<ReqBody, ResBody, Error>;
@@ -317,7 +313,6 @@ where
 
 impl<ReqBody, ResBody, Error> DerefMut for CompositeService<ReqBody, ResBody, Error>
 where
-    ResBody: NotFound<ResBody> + 'static,
     Error: 'static,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {

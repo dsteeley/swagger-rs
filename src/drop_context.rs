@@ -1,10 +1,8 @@
 //! Hyper service that drops a context to an incoming request and passes it on
 //! to a wrapped service.
 
-use http_body_util::Full;
 use hyper::Request;
 use std::marker::PhantomData;
-use bytes::Bytes;
 
 use futures::future::FutureExt as _;
 
@@ -32,18 +30,17 @@ use futures::future::FutureExt as _;
 /// composite_new_service.push(("/base/path/3", DropContextMakeService::new(plain_service)));
 /// ```
 #[derive(Debug)]
-pub struct DropContextMakeService<T, C, Body>
+pub struct DropContextMakeService<T, C>
 where
     C: Send + 'static,
 {
     inner: T,
-    marker: PhantomData<fn(C, Body)>,
+    marker: PhantomData<C>,
 }
 
-impl<T, C, Body> DropContextMakeService<T, C, Body>
+impl<T, C> DropContextMakeService<T, C>
 where
     C: Send + 'static,
-    Body: hyper::body::Body,
 {
     /// Create a new DropContextMakeService struct wrapping a value
     pub fn new(inner: T) -> Self {
@@ -54,15 +51,14 @@ where
     }
 }
 
-impl<Inner, Context, Target, Body> hyper::service::Service<Target>
-    for DropContextMakeService<Inner, Context, Body>
+impl<Inner, Context, Target> hyper::service::Service<Target>
+    for DropContextMakeService<Inner, Context>
 where
     Context: Send + 'static,
     Inner: hyper::service::Service<Target>,
     Inner::Future: Send + 'static,
-    Body: hyper::body::Body,
 {
-    type Response = DropContextService<Inner::Response, Context, Full<Bytes>>;
+    type Response = DropContextService<Inner::Response, Context>;
     type Error = Inner::Error;
     type Future = futures::future::BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -85,24 +81,28 @@ where
 /// ```edition2018
 /// # use swagger::DropContextService;
 /// # use hyper::service::Service as _;
+/// # use http_body_util::Full;
+/// # use hyper_util::service::TowerToHyperService;
 ///
-/// let client = hyper::Client::new();
-/// let mut client = DropContextService::new(client);
-/// let request = (hyper::Request::get("http://www.google.com").body(hyper::Body::empty()).unwrap());
+/// let mut connector = hyper_util::client::legacy::connect::HttpConnector::new();
+/// let mut client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new());
+/// let client = client.build(connector);
+/// let mut client = DropContextService::new(TowerToHyperService::new(client));
+/// let request = (hyper::Request::get("http://www.google.com").body(Full::new(bytes::Bytes::new())).unwrap());
 /// let context = "Some Context".to_string();
 ///
 /// let response = client.call((request, context));
 /// ```
 #[derive(Debug, Clone)]
-pub struct DropContextService<T, C, Body>
+pub struct DropContextService<T, C>
 where
     C: Send + 'static,
 {
     inner: T,
-    marker: PhantomData<fn(C, Body)>,
+    marker: PhantomData<C>,
 }
 
-impl<T, C, Body> DropContextService<T, C, Body>
+impl<T, C> DropContextService<T, C>
 where
     C: Send + 'static,
 {
@@ -116,7 +116,7 @@ where
 }
 
 impl<Inner, Context, Body> hyper::service::Service<(Request<Body>, Context)>
-    for DropContextService<Inner, Context, Body>
+    for DropContextService<Inner, Context>
 where
     Context: Send + 'static,
     Inner: hyper::service::Service<Request<Body>>,
@@ -129,20 +129,3 @@ where
         self.inner.call(req)
     }
 }
-
-// impl<Inner, Context> tower::Service<hyper::Uri> for DropContextService<Inner, Context>
-// where
-//     Context: Send + 'static,
-//     Inner: hyper::service::Service<Request<Full<Bytes>>>,
-// {
-//     type Response = Inner::Response;
-//     type Error = Inner::Error;
-//     type Future = Inner::Future;
-
-//     fn call(&mut self, req: hyper::Uri) -> Self::Future {
-//         self.inner.call(req)
-//     }
-//     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
-//         unimplemented!()
-//     }
-// }

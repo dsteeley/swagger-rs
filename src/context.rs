@@ -502,15 +502,18 @@ impl<T: Clone, C: Clone> Clone for ContextWrapper<T, C> {
 /// # use std::task::{Context, Poll};
 /// # use swagger::auth::{AuthData, Authorization};
 /// # use swagger::XSpanIdString;
+/// # use hyper::body::Body;
+/// # use http_body_util::Full;
+/// # use bytes::Bytes;
 ///
 /// struct ExampleMiddleware<T, C> {
 ///     inner: T,
 ///     marker: PhantomData<C>,
 /// }
 ///
-/// impl<T, C> hyper::service::Service<(hyper::Request<hyper::Body>, C)> for ExampleMiddleware<T, C>
+/// impl<T, C> hyper::service::Service<(hyper::Request<Full<Bytes>>, C)> for ExampleMiddleware<T, C>
 ///     where
-///         T: SwaggerService<hyper::Body, hyper::Body, C>,
+///         T: SwaggerService<Full<Bytes>, Full<Bytes>, C>,
 ///         C: Has<Option<AuthData>> +
 ///            Has<Option<Authorization>> +
 ///            Has<XSpanIdString> +
@@ -522,8 +525,7 @@ impl<T: Clone, C: Clone> Clone for ContextWrapper<T, C> {
 ///     type Error = T::Error;
 ///     type Future = T::Future;
 ///
-///
-///     fn call(&mut self, req: (hyper::Request<hyper::Body>, C)) -> Self::Future {
+///     fn call(&self, req: (hyper::Request<Full<Bytes>>, C)) -> Self::Future {
 ///         self.inner.call(req)
 ///     }
 /// }
@@ -533,8 +535,8 @@ pub trait SwaggerService<RequestBody, ResponseBody, Context>:
     + Service<
         (Request<RequestBody>, Context),
         Response = Response<ResponseBody>,
-        Error = hyper::Error,
-        Future = Pin<Box<dyn Future<Output = Result<Response<ResponseBody>, hyper::Error>>>>,
+        Error = Box<hyper::Error>,
+        Future = Pin<Box<dyn Future<Output = Result<Response<ResponseBody>, Box<hyper::Error>>>>>,
     >
 where
     Context: Has<Option<AuthData>>
@@ -552,8 +554,8 @@ where
         + Service<
             (Request<ReqB>, Context),
             Response = Response<ResB>,
-            Error = hyper::Error,
-            Future = Pin<Box<dyn Future<Output = Result<Response<ResB>, hyper::Error>>>>,
+            Error = Box<hyper::Error>,
+            Future = Pin<Box<dyn Future<Output = Result<Response<ResB>, Box<hyper::Error>>>>>,
         >,
     Context: Has<Option<AuthData>>
         + Has<Option<Authorization>>
