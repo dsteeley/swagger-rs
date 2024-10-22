@@ -76,6 +76,16 @@ impl AuthData {
     }
 }
 
+impl std::fmt::Display for AuthData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AuthData::Basic(username, password) => write!(f, "Basic {}:{}", username, password),
+            AuthData::Bearer(token) => write!(f, "Bearer {}", token),
+            AuthData::ApiKey(apikey) => write!(f, "{}", apikey),
+        }
+    }
+}
+
 /// Bound for Request Context for MakeService wrappers
 pub trait RcBound: Push<Option<Authorization>> + Send + 'static {}
 
@@ -199,14 +209,16 @@ where
 pub fn from_headers(headers: &HeaderMap) -> Option<AuthData> {
     headers.get(AUTHORIZATION).and_then(|value| {
         if let Ok(value_str) = value.to_str() {
+            // Auth schemes in HTTP are case insensitive so we match on lowercase.
+
             // Ideally we would use decode without checking for a hardcoded string.
             // Unfortunately `decode` has a debug_assert that verifies the header starts with the scheme.
             // We therefore can only call `decode` if we have a header with a matching scheme.
-            if value_str.starts_with("Basic ") {
+            if value_str.to_lowercase().starts_with("basic ") {
                 Basic::decode(value).map(|basic| {
                     AuthData::Basic(basic.username().to_string(), basic.password().to_string())
                 })
-            } else if value_str.starts_with("Bearer ") {
+            } else if value_str.to_lowercase().starts_with("bearer ") {
                 Bearer::decode(value).map(|bearer| AuthData::Bearer(bearer.token().to_string()))
             } else {
                 None
@@ -322,5 +334,29 @@ mod tests {
             from_headers(&headers),
             Some(AuthData::Bearer("foo".to_string()))
         )
+    }
+
+    #[test]
+    fn test_display_basic() {
+        let auth_data = AuthData::Basic("user".to_string(), "pass".to_string());
+        assert_eq!(format!("{}", auth_data), "Basic user:pass");
+    }
+
+    #[test]
+    fn test_display_bearer() {
+        let auth_data = AuthData::Bearer("token".to_string());
+        assert_eq!(format!("{}", auth_data), "Bearer token");
+    }
+
+    #[test]
+    fn test_to_string_basic() {
+        let auth_data = AuthData::Basic("user".to_string(), "pass".to_string());
+        assert_eq!(auth_data.to_string(), "Basic user:pass");
+    }
+
+    #[test]
+    fn test_to_string_bearer() {
+        let auth_data = AuthData::Bearer("token".to_string());
+        assert_eq!(auth_data.to_string(), "Bearer token");
     }
 }

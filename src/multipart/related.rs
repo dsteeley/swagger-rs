@@ -42,7 +42,7 @@ pub fn create_multipart_headers(content_type: Option<&HeaderValue>) -> Result<He
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hyper_10::header::{ContentType, Headers};
+    use hyper_10::header::Headers;
     use mime_multipart::Node;
 
     // Test that we can parse the body using read_multipart_body
